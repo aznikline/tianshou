@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import argparse
 import datetime
 import os
 import pickle
 import pprint
-import sys
 
 import numpy as np
 import torch
@@ -26,7 +32,7 @@ from tianshou.utils.net.discrete import DiscreteActor
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task", type=str, default="PongNoFrameskip-v4")
+    parser.add_argument("--task", type=str, default="ALE/Pong-v5")
     parser.add_argument("--seed", type=int, default=1626)
     parser.add_argument("--eps_test", type=float, default=0.001)
     parser.add_argument("--lr", type=float, default=6.25e-5)
@@ -63,7 +69,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--load_buffer_name",
         type=str,
-        default="./expert_DQN_PongNoFrameskip-v4.hdf5",
+        default="./expert_DQN_ALE_Pong-v5.hdf5",
     )
     parser.add_argument("--buffer_from_rl_unplugged", action="store_true", default=False)
     parser.add_argument(

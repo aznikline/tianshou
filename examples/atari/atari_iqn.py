@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import datetime
 import os
 import pprint
-import sys
 
 import numpy as np
 import torch
@@ -24,7 +30,7 @@ log = logging.getLogger(__name__)
 
 
 def main(
-    task: str = "PongNoFrameskip-v4",
+    task: str = "ALE/Pong-v5",
     seed: int = 1234,
     scale_obs: int = 0,
     eps_test: float = 0.005,

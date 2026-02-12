@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import os
 from typing import Literal
 
@@ -8,7 +15,7 @@ from sensai.util import logging
 from tianshou.env.atari.atari_network import (
     ActorFactoryAtariDQN,
 )
-from tianshou.env.atari.atari_wrapper import AtariEnvFactory, AtariEpochStopCallback
+from tianshou.env.atari.atari_wrapper import AtariEpochStopCallback, make_atari_env_factory
 from tianshou.highlevel.config import OnPolicyTrainingConfig
 from tianshou.highlevel.experiment import (
     ExperimentConfig,
@@ -19,7 +26,7 @@ from tianshou.highlevel.params.lr_scheduler import LRSchedulerFactoryFactoryLine
 
 
 def main(
-    task: str = "PongNoFrameskip-v4",
+    task: str = "ALE/Pong-v5",
     persistence_base_dir: str = "log",
     num_experiments: int = 1,
     experiment_launcher: Literal["sequential", "joblib"] = "sequential",
@@ -56,7 +63,7 @@ def main(
         replay_buffer_save_only_last_obs=True,
     )
 
-    env_factory = AtariEnvFactory(task, 4, scale=True)
+    env_factory = make_atari_env_factory(task, 4, scale=True)
 
     experiment_builder = (
         PPOExperimentBuilder(env_factory, experiment_config, training_config)

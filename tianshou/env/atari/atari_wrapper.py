@@ -26,6 +26,48 @@ except ImportError:
     envpool_is_available = False
     envpool = None
 log = logging.getLogger(__name__)
+_ale_namespace_registered = False
+
+
+def _ensure_ale_namespace_registered() -> None:
+    """Ensure Gymnasium Atari ALE namespace is registered."""
+    global _ale_namespace_registered
+    if _ale_namespace_registered:
+        return
+    try:
+        import ale_py
+    except ImportError as exc:
+        raise ImportError(
+            "Atari ALE environments require `ale-py`. Install with `pip install ale-py` "
+            "or `pip install \"gymnasium[atari]\"`."
+        ) from exc
+    if hasattr(gym, "register_envs"):
+        gym.register_envs(ale_py)
+    else:
+        from gymnasium.envs.registration import register_envs
+
+        register_envs(ale_py)
+    _ale_namespace_registered = True
+
+
+def _to_gymnasium_atari_task(task: str) -> str:
+    """Normalize Atari task identifiers to Gymnasium's ALE namespace."""
+    if task.startswith("ALE/"):
+        return task
+    if task.endswith("NoFrameskip-v4"):
+        game = task.removesuffix("NoFrameskip-v4")
+        return f"ALE/{game}-v5"
+    if task.endswith("-v5") and "/" not in task:
+        return f"ALE/{task}"
+    return task
+
+
+def _to_envpool_atari_task(task: str) -> str:
+    """Normalize Atari task identifiers to EnvPool's task format."""
+    gymnasium_task = _to_gymnasium_atari_task(task)
+    if gymnasium_task.startswith("ALE/"):
+        return gymnasium_task.split("/", 1)[1]
+    return gymnasium_task.replace("NoFrameskip-v4", "-v5")
 
 
 def _parse_reset_result(reset_result: tuple) -> tuple[tuple, dict, bool]:
@@ -39,19 +81,9 @@ def _parse_reset_result(reset_result: tuple) -> tuple[tuple, dict, bool]:
     return reset_result, {}, contains_info
 
 
-def get_space_dtype(obs_space: gym.spaces.Box) -> type[np.floating] | type[np.integer]:
-    """TODO."""
-    obs_space_dtype: type[np.integer] | type[np.floating]
-    if np.issubdtype(obs_space.dtype, np.integer):
-        obs_space_dtype = np.integer
-    elif np.issubdtype(obs_space.dtype, np.floating):
-        obs_space_dtype = np.floating
-    else:
-        raise TypeError(
-            f"Unsupported observation space dtype: {obs_space.dtype}. "
-            f"This might be a bug in tianshou or gymnasium, please report it!",
-        )
-    return obs_space_dtype
+def get_space_dtype(obs_space: gym.spaces.Box) -> np.dtype:
+    """Return a concrete numpy dtype accepted by gymnasium.spaces.Box."""
+    return np.dtype(obs_space.dtype)
 
 
 class NoopResetEnv(gym.Wrapper):
@@ -399,15 +431,45 @@ def make_atari_env(
     """Wrapper function for Atari env.
 
     If EnvPool is installed, it will automatically switch to EnvPool's Atari env.
+    Legacy tasks like `PongNoFrameskip-v4` are mapped to Gymnasium's modern
+    `ALE/Pong-v5` equivalent.
 
     :return: a tuple of (single env, training envs, test envs).
     """
-    env_factory = AtariEnvFactory(task, frame_stack, scale=bool(scale))
+    env_factory = make_atari_env_factory(task, frame_stack, scale=bool(scale))
     envs = env_factory.create_envs(num_training_envs, num_test_envs, seed=seed)
     return envs.env, envs.training_envs, envs.test_envs
 
 
-class AtariEnvFactory(EnvFactoryRegistered):
+class AtariEnvPoolFactory(EnvPoolFactory):
+    """Atari-specific EnvPool creation.
+
+    EnvPool internally handles most wrappers implemented by `wrap_deepmind`, so
+    we set equivalent creation kwargs during vector-env construction.
+    """
+
+    def __init__(self, frame_stack: int, scale: bool) -> None:
+        self.frame_stack = frame_stack
+        self.scale = scale
+        if self.scale:
+            warnings.warn(
+                "EnvPool does not include ScaledFloatFrame wrapper, "
+                "please compensate by scaling inside your network's forward function (e.g. `x = x / 255.0` for Atari)",
+            )
+
+    def _transform_task(self, task: str) -> str:
+        return _to_envpool_atari_task(task)
+
+    def _transform_kwargs(self, kwargs: dict, mode: EnvMode) -> dict:
+        kwargs = super()._transform_kwargs(kwargs, mode)
+        is_train = mode == EnvMode.TRAINING
+        kwargs["reward_clip"] = is_train
+        kwargs["episodic_life"] = is_train
+        kwargs["stack_num"] = self.frame_stack
+        return kwargs
+
+
+class GymnasiumAtariEnvFactory(EnvFactoryRegistered):
     def __init__(
         self,
         task: str,
@@ -416,24 +478,30 @@ class AtariEnvFactory(EnvFactoryRegistered):
         use_envpool_if_available: bool = True,
         venv_type: VectorEnvType = VectorEnvType.SUBPROC_SHARED_MEM_AUTO,
     ) -> None:
-        assert "NoFrameskip" in task
+        normalized_task = _to_gymnasium_atari_task(task)
+        if normalized_task.startswith("ALE/"):
+            _ensure_ale_namespace_registered()
         self.frame_stack = frame_stack
         self.scale = scale
         envpool_factory = None
         if use_envpool_if_available:
             if envpool_is_available:
-                envpool_factory = self.EnvPoolFactoryAtari(self)
-                log.info("Using envpool, because it available")
+                envpool_factory = AtariEnvPoolFactory(frame_stack=frame_stack, scale=scale)
+                log.info("Using envpool, because it is available")
             else:
                 log.info("Not using envpool, because it is not available")
         super().__init__(
-            task=task,
+            task=normalized_task,
             venv_type=venv_type,
             envpool_factory=envpool_factory,
         )
 
     def _create_env(self, mode: EnvMode) -> gym.Env:
-        env = super()._create_env(mode)
+        kwargs = self._create_kwargs(mode)
+        # Preserve NoFrameskip-v4 behavior when using ALE v5 ids.
+        kwargs.setdefault("frameskip", 1)
+        kwargs.setdefault("repeat_action_probability", 0.0)
+        env = gym.make(self.task, **kwargs)
         is_train = mode == EnvMode.TRAINING
         return wrap_deepmind(
             env,
@@ -443,32 +511,32 @@ class AtariEnvFactory(EnvFactoryRegistered):
             scale=self.scale,
         )
 
-    class EnvPoolFactoryAtari(EnvPoolFactory):
-        """Atari-specific envpool creation.
-        Since envpool internally handles the functions that are implemented through the wrappers in `wrap_deepmind`,
-        it sets the creation keyword arguments accordingly.
-        """
 
-        def __init__(self, parent: "AtariEnvFactory") -> None:
-            self.parent = parent
-            if self.parent.scale:
-                warnings.warn(
-                    "EnvPool does not include ScaledFloatFrame wrapper, "
-                    "please compensate by scaling inside your network's forward function (e.g. `x = x / 255.0` for Atari)",
-                )
+def make_atari_env_factory(
+    task: str,
+    frame_stack: int,
+    scale: bool = False,
+    use_envpool_if_available: bool = True,
+    venv_type: VectorEnvType = VectorEnvType.SUBPROC_SHARED_MEM_AUTO,
+) -> EnvFactoryRegistered:
+    """Create a modern Atari env factory based on Gymnasium + optional EnvPool."""
+    return GymnasiumAtariEnvFactory(
+        task=task,
+        frame_stack=frame_stack,
+        scale=scale,
+        use_envpool_if_available=use_envpool_if_available,
+        venv_type=venv_type,
+    )
 
-        def _transform_task(self, task: str) -> str:
-            task = super()._transform_task(task)
-            # TODO: Maybe warn user, explain why this is needed
-            return task.replace("NoFrameskip-v4", "-v5")
 
-        def _transform_kwargs(self, kwargs: dict, mode: EnvMode) -> dict:
-            kwargs = super()._transform_kwargs(kwargs, mode)
-            is_train = mode == EnvMode.TRAINING
-            kwargs["reward_clip"] = is_train
-            kwargs["episodic_life"] = is_train
-            kwargs["stack_num"] = self.parent.frame_stack
-            return kwargs
+class AtariEnvFactory(GymnasiumAtariEnvFactory):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        warnings.warn(
+            "AtariEnvFactory is deprecated, use make_atari_env_factory(...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
 
 
 class AtariEpochStopCallback(EpochStopCallback):
