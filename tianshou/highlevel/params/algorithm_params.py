@@ -503,6 +503,29 @@ class PPOParams(A2CParams):
 
 
 @dataclass(kw_only=True)
+class DAPOParams(PPOParams):
+    target_kl: float | None = 0.02
+    """
+    Approximate KL target used to adapt clip range during updates.
+    Set to None to disable adaptive clip scheduling.
+    """
+    clip_adaptation_rate: float = 0.1
+    """Multiplicative clip adaptation factor in (0, 1)."""
+    min_eps_clip: float = 0.05
+    """Lower bound for adaptive clip range."""
+    max_eps_clip: float = 0.4
+    """Upper bound for adaptive clip range."""
+
+
+@dataclass(kw_only=True)
+class GRPOParams(PPOParams):
+    group_advantage_normalization: bool = True
+    """Whether to normalize advantages per group when group ids are available."""
+    group_batch_key: str = "group_id"
+    """Key name in `batch.info` used to retrieve per-sample group ids."""
+
+
+@dataclass(kw_only=True)
 class NPGParams(ActorCriticOnPolicyParams, ParamsMixinGeneralAdvantageEstimation):
     optim_critic_iters: int = 5
     """

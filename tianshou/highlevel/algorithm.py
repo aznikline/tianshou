@@ -9,8 +9,10 @@ from sensai.util.string import ToStringMixin
 
 from tianshou.algorithm import (
     A2C,
+    DAPO,
     DDPG,
     DQN,
+    GRPO,
     IQN,
     NPG,
     PPO,
@@ -52,9 +54,11 @@ from tianshou.highlevel.module.core import (
 from tianshou.highlevel.module.critic import CriticEnsembleFactory, CriticFactory
 from tianshou.highlevel.params.algorithm_params import (
     A2CParams,
+    DAPOParams,
     DDPGParams,
     DiscreteSACParams,
     DQNParams,
+    GRPOParams,
     IQNParams,
     NPGParams,
     Params,
@@ -406,6 +410,16 @@ class A2CAlgorithmFactory(ActorCriticOnPolicyAlgorithmFactory[A2CParams, A2C]):
 class PPOAlgorithmFactory(ActorCriticOnPolicyAlgorithmFactory[PPOParams, PPO]):
     def _get_algorithm_class(self) -> type[PPO]:
         return PPO
+
+
+class DAPOAlgorithmFactory(ActorCriticOnPolicyAlgorithmFactory[DAPOParams, DAPO]):
+    def _get_algorithm_class(self) -> type[DAPO]:
+        return DAPO
+
+
+class GRPOAlgorithmFactory(ActorCriticOnPolicyAlgorithmFactory[GRPOParams, GRPO]):
+    def _get_algorithm_class(self) -> type[GRPO]:
+        return GRPO
 
 
 class NPGAlgorithmFactory(ActorCriticOnPolicyAlgorithmFactory[NPGParams, NPG]):

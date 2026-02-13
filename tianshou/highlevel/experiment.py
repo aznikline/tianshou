@@ -41,9 +41,11 @@ from tianshou.evaluation.rliable_evaluation import load_and_eval_experiment
 from tianshou.highlevel.algorithm import (
     A2CAlgorithmFactory,
     AlgorithmFactory,
+    DAPOAlgorithmFactory,
     DDPGAlgorithmFactory,
     DiscreteSACAlgorithmFactory,
     DQNAlgorithmFactory,
+    GRPOAlgorithmFactory,
     IQNAlgorithmFactory,
     NPGAlgorithmFactory,
     PPOAlgorithmFactory,
@@ -84,9 +86,11 @@ from tianshou.highlevel.module.intermediate import IntermediateModuleFactory
 from tianshou.highlevel.module.special import ImplicitQuantileNetworkFactory
 from tianshou.highlevel.params.algorithm_params import (
     A2CParams,
+    DAPOParams,
     DDPGParams,
     DiscreteSACParams,
     DQNParams,
+    GRPOParams,
     IQNParams,
     NPGParams,
     PPOParams,
@@ -1183,6 +1187,66 @@ class PPOExperimentBuilder(
 
     def _create_algorithm_factory(self) -> AlgorithmFactory:
         return PPOAlgorithmFactory(
+            self._params,
+            self._training_config,
+            self._get_actor_factory(),
+            self._get_critic_factory(0),
+            self._get_optim_factory(),
+        )
+
+
+class DAPOExperimentBuilder(
+    OnPolicyExperimentBuilder,
+    _BuilderMixinActorFactory_ContinuousGaussian,
+    _BuilderMixinSingleCriticCanUseActorFactory,
+):
+    def __init__(
+        self,
+        env_factory: EnvFactory,
+        experiment_config: ExperimentConfig | None = None,
+        training_config: OnPolicyTrainingConfig | None = None,
+    ):
+        super().__init__(env_factory, experiment_config, training_config)
+        _BuilderMixinActorFactory_ContinuousGaussian.__init__(self)
+        _BuilderMixinSingleCriticCanUseActorFactory.__init__(self, self)
+        self._params: DAPOParams = DAPOParams()
+
+    def with_dapo_params(self, params: DAPOParams) -> Self:
+        self._params = params
+        return self
+
+    def _create_algorithm_factory(self) -> AlgorithmFactory:
+        return DAPOAlgorithmFactory(
+            self._params,
+            self._training_config,
+            self._get_actor_factory(),
+            self._get_critic_factory(0),
+            self._get_optim_factory(),
+        )
+
+
+class GRPOExperimentBuilder(
+    OnPolicyExperimentBuilder,
+    _BuilderMixinActorFactory_ContinuousGaussian,
+    _BuilderMixinSingleCriticCanUseActorFactory,
+):
+    def __init__(
+        self,
+        env_factory: EnvFactory,
+        experiment_config: ExperimentConfig | None = None,
+        training_config: OnPolicyTrainingConfig | None = None,
+    ):
+        super().__init__(env_factory, experiment_config, training_config)
+        _BuilderMixinActorFactory_ContinuousGaussian.__init__(self)
+        _BuilderMixinSingleCriticCanUseActorFactory.__init__(self, self)
+        self._params: GRPOParams = GRPOParams()
+
+    def with_grpo_params(self, params: GRPOParams) -> Self:
+        self._params = params
+        return self
+
+    def _create_algorithm_factory(self) -> AlgorithmFactory:
+        return GRPOAlgorithmFactory(
             self._params,
             self._training_config,
             self._get_actor_factory(),

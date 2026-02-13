@@ -27,6 +27,7 @@ from tianshou.highlevel.params.lr_scheduler import LRSchedulerFactoryFactoryLine
 
 def main(
     task: str = "ALE/Pong-v5",
+    algo: Literal["ppo", "dapo", "grpo"] = "ppo",
     persistence_base_dir: str = "log",
     num_experiments: int = 1,
     experiment_launcher: Literal["sequential", "joblib"] = "sequential",
@@ -65,9 +66,9 @@ def main(
 
     env_factory = make_atari_env_factory(task, 4, scale=True)
 
-    experiment_builder = (
-        PPOExperimentBuilder(env_factory, experiment_config, training_config)
-        .with_ppo_params(
+    if algo == "ppo":
+        experiment_builder = PPOExperimentBuilder(env_factory, experiment_config, training_config)
+        experiment_builder = experiment_builder.with_ppo_params(
             PPOParams(
                 gamma=0.99,
                 gae_lambda=0.95,
@@ -84,7 +85,59 @@ def main(
                 lr_scheduler=LRSchedulerFactoryFactoryLinear(training_config),
             ),
         )
-        .with_actor_factory(ActorFactoryAtariDQN(scale_obs=True, features_only=True))
+    elif algo == "dapo":
+        from tianshou.highlevel.experiment import DAPOExperimentBuilder
+        from tianshou.highlevel.params.algorithm_params import DAPOParams
+
+        experiment_builder = DAPOExperimentBuilder(env_factory, experiment_config, training_config)
+        experiment_builder = experiment_builder.with_dapo_params(
+            DAPOParams(
+                gamma=0.99,
+                gae_lambda=0.95,
+                return_scaling=False,
+                ent_coef=0.01,
+                vf_coef=0.25,
+                max_grad_norm=0.5,
+                value_clip=True,
+                advantage_normalization=True,
+                eps_clip=0.1,
+                dual_clip=None,
+                recompute_advantage=False,
+                lr=2.5e-4,
+                lr_scheduler=LRSchedulerFactoryFactoryLinear(training_config),
+                target_kl=0.02,
+                clip_adaptation_rate=0.1,
+                min_eps_clip=0.05,
+                max_eps_clip=0.4,
+            ),
+        )
+    else:
+        from tianshou.highlevel.experiment import GRPOExperimentBuilder
+        from tianshou.highlevel.params.algorithm_params import GRPOParams
+
+        experiment_builder = GRPOExperimentBuilder(env_factory, experiment_config, training_config)
+        experiment_builder = experiment_builder.with_grpo_params(
+            GRPOParams(
+                gamma=0.99,
+                gae_lambda=0.95,
+                return_scaling=False,
+                ent_coef=0.01,
+                vf_coef=0.25,
+                max_grad_norm=0.5,
+                value_clip=True,
+                advantage_normalization=True,
+                eps_clip=0.1,
+                dual_clip=None,
+                recompute_advantage=False,
+                lr=2.5e-4,
+                lr_scheduler=LRSchedulerFactoryFactoryLinear(training_config),
+                group_advantage_normalization=True,
+                group_batch_key="group_id",
+            ),
+        )
+
+    experiment_builder = (
+        experiment_builder.with_actor_factory(ActorFactoryAtariDQN(scale_obs=True, features_only=True))
         .with_critic_factory_use_actor()
         .with_epoch_stop_callback(AtariEpochStopCallback(task))
     )
