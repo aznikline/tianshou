@@ -29,6 +29,11 @@ log = logging.getLogger(__name__)
 _ale_namespace_registered = False
 
 
+def is_envpool_available() -> bool:
+    """Return whether envpool is importable in the current runtime."""
+    return envpool_is_available
+
+
 def _ensure_ale_namespace_registered() -> None:
     """Ensure Gymnasium Atari ALE namespace is registered."""
     global _ale_namespace_registered
@@ -427,6 +432,7 @@ def make_atari_env(
     num_test_envs: int,
     scale: int | bool = False,
     frame_stack: int = 4,
+    require_envpool: bool = False,
 ) -> tuple[Env, BaseVectorEnv, BaseVectorEnv]:
     """Wrapper function for Atari env.
 
@@ -436,7 +442,12 @@ def make_atari_env(
 
     :return: a tuple of (single env, training envs, test envs).
     """
-    env_factory = make_atari_env_factory(task, frame_stack, scale=bool(scale))
+    env_factory = make_atari_env_factory(
+        task,
+        frame_stack,
+        scale=bool(scale),
+        require_envpool=require_envpool,
+    )
     envs = env_factory.create_envs(num_training_envs, num_test_envs, seed=seed)
     return envs.env, envs.training_envs, envs.test_envs
 
@@ -476,6 +487,7 @@ class GymnasiumAtariEnvFactory(EnvFactoryRegistered):
         frame_stack: int,
         scale: bool = False,
         use_envpool_if_available: bool = True,
+        require_envpool: bool = False,
         venv_type: VectorEnvType = VectorEnvType.SUBPROC_SHARED_MEM_AUTO,
     ) -> None:
         normalized_task = _to_gymnasium_atari_task(task)
@@ -484,6 +496,12 @@ class GymnasiumAtariEnvFactory(EnvFactoryRegistered):
         self.frame_stack = frame_stack
         self.scale = scale
         envpool_factory = None
+        if require_envpool and not envpool_is_available:
+            raise RuntimeError(
+                "EnvPool is required but not available. Install `envpool` in your current "
+                "Python environment, then rerun. Note: prebuilt EnvPool wheels are typically "
+                "Linux-only, so macOS often cannot use EnvPool acceleration.",
+            )
         if use_envpool_if_available:
             if envpool_is_available:
                 envpool_factory = AtariEnvPoolFactory(frame_stack=frame_stack, scale=scale)
@@ -517,6 +535,7 @@ def make_atari_env_factory(
     frame_stack: int,
     scale: bool = False,
     use_envpool_if_available: bool = True,
+    require_envpool: bool = False,
     venv_type: VectorEnvType = VectorEnvType.SUBPROC_SHARED_MEM_AUTO,
 ) -> EnvFactoryRegistered:
     """Create a modern Atari env factory based on Gymnasium + optional EnvPool."""
@@ -525,6 +544,7 @@ def make_atari_env_factory(
         frame_stack=frame_stack,
         scale=scale,
         use_envpool_if_available=use_envpool_if_available,
+        require_envpool=require_envpool,
         venv_type=venv_type,
     )
 
