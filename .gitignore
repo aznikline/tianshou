@@ -162,6 +162,7 @@ docs/conf.py
 
 # Serena
 /.serena
+/.worktrees/
 
 # determinism test snapshots
 /test/resources/determinism/
