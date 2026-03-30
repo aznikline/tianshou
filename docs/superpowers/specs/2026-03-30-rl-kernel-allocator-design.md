@@ -214,12 +214,12 @@ At the end of an episode, the simulator adds optional bonuses or penalties for:
 
 ### 9.1 Training algorithm
 
-The prototype uses **DQN** in user space because:
+The prototype uses **GRPO** in user space because:
 
-- the action space is discrete and moderate,
-- the simulator exposes a fixed-width observation vector,
-- DQN is straightforward to implement and debug with the existing `tianshou` stack,
-- deployment does not require kernel-side neural-network inference.
+- the allocator can be framed as a discrete-action policy optimization problem,
+- GRPO keeps the user-space training loop separate from the deterministic kernel deployment format,
+- the table-export deployment path remains unchanged because kernel space still consumes only a validated lookup table,
+- the prototype can expose a lightweight `--dry-run` entrypoint without requiring kernel-side neural-network inference.
 
 ### 9.2 Deployment representation
 
@@ -227,7 +227,7 @@ The runtime policy deployed in the kernel is **not** a neural network.
 
 Instead:
 
-1. DQN is trained over the simulator state/action space.
+1. GRPO is trained over the simulator state/action space.
 2. The learned policy is evaluated over all valid discretized states.
 3. The best action for each state is exported into a dense or sparse table.
 4. The kernel only loads and uses the table.
