@@ -71,6 +71,7 @@ The system has four layers:
 The kernel module owns one or more pre-reserved memory pools and exports:
 
 - `void *rl_alloc(size_t size, gfp_t flags);`
+- `void *rl_alloc_ex(size_t size, gfp_t flags, u32 req_flags);`
 - `void rl_free(void *ptr);`
 
 The allocator uses a classic variable-sized free-list allocator inside those pools:
@@ -108,6 +109,7 @@ Each allocation or free decision uses a subset of the following features:
 - recent alloc/free mix bucket over a fixed window,
 - recent average request size bucket,
 - current CPU-local pool pressure bucket,
+- semantic request flags for `sync`, `async`, `anon`, `file`, `reclaimable`, `movable`, and `high_order`,
 - operation type bucket (`alloc` or `free`).
 
 ### 6.2 Bucket definitions
@@ -166,6 +168,16 @@ The initial prototype action set is:
 - `ACT_BEST_FIT_EAGER_COALESCE`
 - `ACT_CANDIDATE_2_EAGER_COALESCE`
 - `ACT_CANDIDATE_3_EAGER_COALESCE`
+
+The semantic action set extends the base actions with:
+
+- sync-compact preference,
+- async-defer preference,
+- anonymous affinity,
+- file-backed affinity,
+- reclaimable reuse preference,
+- movable spread preference,
+- high-order guard preference.
 
 For `free` operations the action influences the post-free coalescing mode:
 
@@ -251,7 +263,7 @@ Where:
 - `op`: `alloc` or `free`,
 - `ptr_id`: trace-local allocation identifier,
 - `size`: request size in bytes,
-- `flags`: optional request metadata.
+- `flags`: optional request metadata, either as a bitmask or symbolic tokens such as `sync|anon|high_order`.
 
 For real traces that are not yet available, the tooling will also generate synthetic traces matching realistic allocation mixes.
 

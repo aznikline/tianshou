@@ -15,13 +15,15 @@
 #define RL_HOLE_BUCKETS 5
 #define RL_PRESSURE_BUCKETS 5
 #define RL_MIX_BUCKETS 3
+#define RL_REQ_FLAG_BUCKETS 128
 #define RL_STATE_KEY_SPACE \
 	(2 * RL_REQ_BUCKETS * RL_FRAG_BUCKETS * RL_HOLE_BUCKETS * \
-	 RL_PRESSURE_BUCKETS * RL_MIX_BUCKETS)
+	 RL_PRESSURE_BUCKETS * RL_MIX_BUCKETS * RL_REQ_FLAG_BUCKETS)
 
 struct rl_block {
 	u32 offset;
 	u32 size;
+	u32 tags;
 	struct list_head list;
 };
 
@@ -45,10 +47,14 @@ int rl_pool_init(struct rl_pool *pool, size_t total_bytes, u32 max_blocks,
 		 u8 baseline_action, gfp_t gfp_mask);
 void rl_pool_destroy(struct rl_pool *pool);
 void rl_pool_set_policy(struct rl_pool *pool, struct rl_policy *policy);
-u32 rl_pool_build_state_key(const struct rl_pool *pool, size_t size, bool is_free);
-u8 rl_pool_select_action(const struct rl_pool *pool, size_t size, bool is_free);
-void *rl_pool_alloc(struct rl_pool *pool, size_t size, u8 action, u64 *latency_ns);
+u32 rl_pool_build_state_key(const struct rl_pool *pool, size_t size, bool is_free,
+			    u32 req_flags);
+u8 rl_pool_select_action(const struct rl_pool *pool, size_t size, bool is_free,
+			 u32 req_flags);
+void *rl_pool_alloc(struct rl_pool *pool, size_t size, u8 action, u32 req_flags,
+		    u64 *latency_ns);
 int rl_pool_free(struct rl_pool *pool, void *ptr, bool eager_coalesce, u64 *latency_ns);
+u32 rl_pool_request_flags_for_ptr(struct rl_pool *pool, void *ptr);
 u32 rl_pool_largest_free_block(const struct rl_pool *pool);
 u32 rl_pool_free_hole_count(const struct rl_pool *pool);
 

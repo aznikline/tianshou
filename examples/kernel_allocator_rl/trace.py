@@ -4,6 +4,8 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
+from examples.kernel_allocator_rl.config import parse_request_flags
+
 
 @dataclass(frozen=True)
 class TraceEvent:
@@ -25,7 +27,7 @@ def load_trace_csv(path: str | Path) -> list[TraceEvent]:
                 op=row["op"],
                 ptr_id=row["ptr_id"],
                 size=int(row["size"]),
-                flags=int(row["flags"]),
+                flags=parse_request_flags(row["flags"]),
             )
             for row in reader
         ]

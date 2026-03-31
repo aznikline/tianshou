@@ -1,4 +1,5 @@
 #include <linux/errno.h>
+#include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/ktime.h>
 #include <linux/list.h>
@@ -27,6 +28,7 @@ static void rl_pool_desc_put(struct rl_block *block, struct rl_pool *pool)
 {
 	block->offset = 0;
 	block->size = 0;
+	block->tags = 0;
 	list_add_tail(&block->list, &pool->desc_free_list);
 }
 
@@ -59,6 +61,7 @@ static void rl_pool_coalesce_locked(struct rl_pool *pool)
 			continue;
 
 		block->size += next->size;
+		block->tags |= next->tags;
 		list_del_init(&next->list);
 		rl_pool_desc_put(next, pool);
 	}
@@ -76,52 +79,150 @@ static struct rl_block *rl_pool_find_used_locked(struct rl_pool *pool, u32 offse
 	return NULL;
 }
 
-static struct rl_block *rl_pool_candidate_locked(struct rl_pool *pool, size_t size, u8 action)
+static u8 rl_pool_resolve_semantic_action(u8 action, u32 req_flags)
+{
+	if (action != RL_ACTION_SEMANTIC_DEFAULT)
+		return action;
+	if (rl_req_has(req_flags, RL_REQ_HIGH_ORDER))
+		return RL_ACTION_HIGH_ORDER_GUARD;
+	if (rl_req_has(req_flags, RL_REQ_ASYNC))
+		return RL_ACTION_ASYNC_DEFER;
+	if (rl_req_has(req_flags, RL_REQ_SYNC))
+		return RL_ACTION_SYNC_COMPACT;
+	if (rl_req_has(req_flags, RL_REQ_FILE))
+		return RL_ACTION_FILE_AFFINITY;
+	if (rl_req_has(req_flags, RL_REQ_ANON))
+		return RL_ACTION_ANON_AFFINITY;
+	if (rl_req_has(req_flags, RL_REQ_RECLAIMABLE))
+		return RL_ACTION_RECLAIM_REUSE;
+	if (rl_req_has(req_flags, RL_REQ_MOVABLE))
+		return RL_ACTION_MOVABLE_SPREAD;
+
+	return RL_ACTION_BEST_FIT;
+}
+
+static int rl_pool_tag_score(u32 tags, u32 req_flags)
+{
+	return hweight32(tags & req_flags);
+}
+
+static struct rl_block *rl_pool_pick_tagged_locked(struct rl_pool *pool, size_t size,
+						   u32 wanted_flags)
 {
 	struct rl_block *block;
 	struct rl_block *best = NULL;
-	struct rl_block *second = NULL;
+	int best_score = -1;
+
+	list_for_each_entry(block, &pool->free_list, list) {
+		int score;
+
+		if (block->size < size)
+			continue;
+		score = rl_pool_tag_score(block->tags, wanted_flags);
+		if (!best || score > best_score ||
+		    (score == best_score && block->size < best->size)) {
+			best = block;
+			best_score = score;
+		}
+	}
+
+	return best;
+}
+
+static struct rl_block *rl_pool_pick_first_locked(struct rl_pool *pool, size_t size)
+{
+	struct rl_block *block;
+
+	list_for_each_entry(block, &pool->free_list, list) {
+		if (block->size >= size)
+			return block;
+	}
+
+	return NULL;
+}
+
+static struct rl_block *rl_pool_pick_best_locked(struct rl_pool *pool, size_t size)
+{
+	struct rl_block *block;
+	struct rl_block *best = NULL;
+
+	list_for_each_entry(block, &pool->free_list, list) {
+		if (block->size < size)
+			continue;
+		if (!best || block->size < best->size)
+			best = block;
+	}
+
+	return best;
+}
+
+static struct rl_block *rl_pool_pick_largest_locked(struct rl_pool *pool, size_t size)
+{
+	struct rl_block *block;
 	struct rl_block *largest = NULL;
 	u32 largest_size = 0;
 
-	switch (rl_action_base(action)) {
+	list_for_each_entry(block, &pool->free_list, list) {
+		if (block->size < size)
+			continue;
+		if (!largest || block->size > largest_size) {
+			largest = block;
+			largest_size = block->size;
+		}
+	}
+
+	return largest;
+}
+
+static struct rl_block *rl_pool_pick_highest_offset_locked(struct rl_pool *pool, size_t size)
+{
+	struct rl_block *block;
+	struct rl_block *selected = NULL;
+
+	list_for_each_entry(block, &pool->free_list, list) {
+		if (block->size < size)
+			continue;
+		if (!selected || block->offset > selected->offset)
+			selected = block;
+	}
+
+	return selected;
+}
+
+static struct rl_block *rl_pool_candidate_locked(struct rl_pool *pool, size_t size,
+						 u8 action, u32 req_flags)
+{
+	action = rl_pool_resolve_semantic_action(action, req_flags);
+
+	switch (action) {
 	case RL_ACTION_FIRST_FIT:
-		list_for_each_entry(block, &pool->free_list, list) {
-			if (block->size >= size)
-				return block;
-		}
-		return NULL;
+	case RL_ACTION_FIRST_FIT_EAGER:
+	case RL_ACTION_ASYNC_DEFER:
+		return rl_pool_pick_first_locked(pool, size);
 	case RL_ACTION_BEST_FIT:
-		list_for_each_entry(block, &pool->free_list, list) {
-			if (block->size < size)
-				continue;
-			if (!best || block->size < best->size)
-				best = block;
-		}
-		return best;
-	case RL_ACTION_CANDIDATE_2:
-		list_for_each_entry(block, &pool->free_list, list) {
-			if (block->size < size)
-				continue;
-			if (!best) {
-				best = block;
-				continue;
-			}
-			second = block;
-			break;
-		}
-		return second ? second : best;
-	case RL_ACTION_CANDIDATE_3:
+	case RL_ACTION_BEST_FIT_EAGER:
+	case RL_ACTION_SYNC_COMPACT:
+		return rl_pool_pick_best_locked(pool, size);
+	case RL_ACTION_FLAG_AFFINITY:
+	case RL_ACTION_FLAG_AFFINITY_EAGER:
+		return rl_pool_pick_tagged_locked(pool, size, req_flags);
+	case RL_ACTION_LARGEST_FIT:
+	case RL_ACTION_LARGEST_FIT_EAGER:
+		return rl_pool_pick_largest_locked(pool, size);
+	case RL_ACTION_ANON_AFFINITY:
+		return rl_pool_pick_tagged_locked(pool, size, RL_REQ_ANON);
+	case RL_ACTION_FILE_AFFINITY:
+		return rl_pool_pick_tagged_locked(pool, size, RL_REQ_FILE);
+	case RL_ACTION_RECLAIM_REUSE:
+		return rl_pool_pick_tagged_locked(pool, size, RL_REQ_RECLAIMABLE);
+	case RL_ACTION_MOVABLE_SPREAD:
+		return rl_pool_pick_highest_offset_locked(pool, size);
+	case RL_ACTION_HIGH_ORDER_GUARD:
+		if (rl_req_has(req_flags, RL_REQ_HIGH_ORDER))
+			return rl_pool_pick_largest_locked(pool, size);
+		return rl_pool_pick_best_locked(pool, size);
 	default:
-		list_for_each_entry(block, &pool->free_list, list) {
-			if (block->size < size)
-				continue;
-			if (!largest || block->size > largest_size) {
-				largest = block;
-				largest_size = block->size;
-			}
-		}
-		return largest;
+		return rl_pool_pick_best_locked(pool, size);
 	}
 }
 
@@ -206,6 +307,11 @@ static u32 rl_pool_bucket_mix(const struct rl_pool *pool)
 	return 1;
 }
 
+static u32 rl_pool_bucket_req_flags(u32 req_flags)
+{
+	return req_flags & RL_REQ_FLAG_MASK;
+}
+
 int rl_pool_init(struct rl_pool *pool, size_t total_bytes, u32 max_blocks,
 		 u8 baseline_action, gfp_t gfp_mask)
 {
@@ -251,6 +357,7 @@ int rl_pool_init(struct rl_pool *pool, size_t total_bytes, u32 max_blocks,
 
 	block->offset = 0;
 	block->size = total_bytes;
+	block->tags = 0;
 	list_add_tail(&block->list, &pool->free_list);
 
 	return 0;
@@ -300,7 +407,8 @@ u32 rl_pool_free_hole_count(const struct rl_pool *pool)
 	return count;
 }
 
-u32 rl_pool_build_state_key(const struct rl_pool *pool, size_t size, bool is_free)
+u32 rl_pool_build_state_key(const struct rl_pool *pool, size_t size, bool is_free,
+			    u32 req_flags)
 {
 	u32 key = is_free ? 1 : 0;
 
@@ -309,11 +417,13 @@ u32 rl_pool_build_state_key(const struct rl_pool *pool, size_t size, bool is_fre
 	key = key * RL_HOLE_BUCKETS + rl_pool_bucket_holes(pool);
 	key = key * RL_PRESSURE_BUCKETS + rl_pool_bucket_pressure(pool);
 	key = key * RL_MIX_BUCKETS + rl_pool_bucket_mix(pool);
+	key = key * RL_REQ_FLAG_BUCKETS + rl_pool_bucket_req_flags(req_flags);
 
 	return key;
 }
 
-u8 rl_pool_select_action(const struct rl_pool *pool, size_t size, bool is_free)
+u8 rl_pool_select_action(const struct rl_pool *pool, size_t size, bool is_free,
+			 u32 req_flags)
 {
 	const struct rl_policy *policy;
 	u8 action = READ_ONCE(pool->baseline_action);
@@ -324,7 +434,7 @@ u8 rl_pool_select_action(const struct rl_pool *pool, size_t size, bool is_free)
 	if (!policy)
 		goto out;
 
-	state_key = rl_pool_build_state_key(pool, size, is_free);
+	state_key = rl_pool_build_state_key(pool, size, is_free, req_flags);
 	if (rl_policy_lookup(policy, state_key, &action))
 		action = READ_ONCE(pool->baseline_action);
 out:
@@ -332,7 +442,8 @@ out:
 	return action;
 }
 
-void *rl_pool_alloc(struct rl_pool *pool, size_t size, u8 action, u64 *latency_ns)
+void *rl_pool_alloc(struct rl_pool *pool, size_t size, u8 action, u32 req_flags,
+		    u64 *latency_ns)
 {
 	struct rl_block *free_block;
 	struct rl_block *used_block;
@@ -347,7 +458,7 @@ void *rl_pool_alloc(struct rl_pool *pool, size_t size, u8 action, u64 *latency_n
 	started_ns = ktime_get_ns();
 	spin_lock_irqsave(&pool->lock, flags);
 
-	free_block = rl_pool_candidate_locked(pool, size, action);
+	free_block = rl_pool_candidate_locked(pool, size, action, req_flags);
 	if (!free_block) {
 		spin_unlock_irqrestore(&pool->lock, flags);
 		if (latency_ns)
@@ -357,6 +468,7 @@ void *rl_pool_alloc(struct rl_pool *pool, size_t size, u8 action, u64 *latency_n
 
 	offset = free_block->offset;
 	if (free_block->size == size) {
+		free_block->tags = req_flags;
 		list_del_init(&free_block->list);
 		list_add_tail(&free_block->list, &pool->used_list);
 	} else {
@@ -369,6 +481,7 @@ void *rl_pool_alloc(struct rl_pool *pool, size_t size, u8 action, u64 *latency_n
 		}
 		used_block->offset = offset;
 		used_block->size = size;
+		used_block->tags = req_flags;
 		list_add_tail(&used_block->list, &pool->used_list);
 		free_block->offset += size;
 		free_block->size -= size;
@@ -423,4 +536,29 @@ int rl_pool_free(struct rl_pool *pool, void *ptr, bool eager_coalesce, u64 *late
 		*latency_ns = ktime_get_ns() - started_ns;
 
 	return 0;
+}
+
+u32 rl_pool_request_flags_for_ptr(struct rl_pool *pool, void *ptr)
+{
+	struct rl_block *block;
+	unsigned long flags;
+	u32 req_flags = 0;
+	u32 offset;
+	char *base;
+
+	if (!pool || !ptr)
+		return 0;
+
+	base = pool->base;
+	if ((char *)ptr < base || (char *)ptr >= base + pool->total_bytes)
+		return 0;
+
+	offset = (u32)((char *)ptr - base);
+	spin_lock_irqsave(&pool->lock, flags);
+	block = rl_pool_find_used_locked(pool, offset);
+	if (block)
+		req_flags = block->tags;
+	spin_unlock_irqrestore(&pool->lock, flags);
+
+	return req_flags;
 }

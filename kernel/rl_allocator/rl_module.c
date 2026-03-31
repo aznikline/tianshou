@@ -79,6 +79,12 @@ static void rl_set_baseline_action_all(u8 action)
 
 void *rl_alloc(size_t size, gfp_t flags)
 {
+	return rl_alloc_ex(size, flags, rl_req_flags_from_gfp(flags, size));
+}
+EXPORT_SYMBOL_GPL(rl_alloc);
+
+void *rl_alloc_ex(size_t size, gfp_t flags, u32 req_flags)
+{
 	struct rl_pool *pool;
 	u8 action;
 
@@ -88,19 +94,20 @@ void *rl_alloc(size_t size, gfp_t flags)
 		return NULL;
 
 	if (READ_ONCE(rl_mode) == RL_MODE_TABLE)
-		action = rl_pool_select_action(pool, size, false);
+		action = rl_pool_select_action(pool, size, false, req_flags);
 	else
 		action = rl_mode_to_baseline_action(READ_ONCE(rl_mode));
 
-	return rl_pool_alloc(pool, size, action, NULL);
+	return rl_pool_alloc(pool, size, action, req_flags, NULL);
 }
-EXPORT_SYMBOL_GPL(rl_alloc);
+EXPORT_SYMBOL_GPL(rl_alloc_ex);
 
 void rl_free(void *ptr)
 {
 	struct rl_pool *pool;
 	bool eager = false;
 	u8 action;
+	u32 req_flags = 0;
 
 	if (!ptr)
 		return;
@@ -109,8 +116,9 @@ void rl_free(void *ptr)
 	if (!pool)
 		return;
 
+	req_flags = rl_pool_request_flags_for_ptr(pool, ptr);
 	if (READ_ONCE(rl_mode) == RL_MODE_TABLE) {
-		action = rl_pool_select_action(pool, 0, true);
+		action = rl_pool_select_action(pool, 0, true, req_flags);
 		eager = rl_action_is_eager(action);
 	}
 

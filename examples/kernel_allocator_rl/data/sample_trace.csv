@@ -1,7 +1,7 @@
 ts,cpu,op,ptr_id,size,flags
-1,0,alloc,a0,64,0
-2,0,alloc,a1,32,0
+1,0,alloc,a0,64,sync|anon
+2,0,alloc,a1,32,async|file|reclaimable
 3,0,free,a0,0,0
-4,0,alloc,a2,128,0
+4,0,alloc,a2,128,sync|movable
 5,0,free,a1,0,0
 6,0,free,a2,0,0
