@@ -5,6 +5,7 @@ This directory contains the user-space side of the RL-guided kernel allocator pr
 - trace loading,
 - allocator simulation,
 - Gym-style environment wrapper,
+- semantic request flags for `sync`, `async`, `anon`, `file`, `reclaimable`, `movable`, and `high_order`,
 - policy table export,
 - synthetic trace generation,
 - training entrypoint scaffolding.
@@ -34,3 +35,15 @@ Run the user-space tests:
 ```bash
 .venv/bin/python -m pytest examples/kernel_allocator_rl/tests -q
 ```
+
+## Trace Flags
+
+The `flags` column accepts either an integer bitmask or symbolic tokens joined by `|`, for example:
+
+```text
+sync|anon
+async|file|reclaimable
+sync|movable|high_order
+```
+
+The simulator and benchmark pipeline use these flags both in the state representation and in the expanded 16-action allocator policy.

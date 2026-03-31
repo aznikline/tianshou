@@ -62,13 +62,22 @@ def bucket_mix(event: TraceEvent) -> int:
 
 
 def build_state_key(simulator: AllocatorSimulator, event: TraceEvent) -> int:
-    state = simulator.build_state(request_size=event.size, op=event.op, cpu=event.cpu)
+    request_flags = event.flags
+    if event.op == "free" and not request_flags:
+        request_flags = simulator.request_flags_for_ptr(event.ptr_id)
+    state = simulator.build_state(
+        request_size=event.size,
+        op=event.op,
+        cpu=event.cpu,
+        request_flags=request_flags,
+    )
     key = state["op"]
     key = key * 10 + state["req_bucket"]
     key = key * 6 + state["frag_bucket"]
     key = key * 5 + bucket_holes(simulator.free_hole_count)
     key = key * 5 + state["pressure_bucket"]
     key = key * 3 + bucket_mix(event)
+    key = key * 128 + state["req_flags"]
     return key
 
 
@@ -104,7 +113,12 @@ def replay(trace: list[TraceEvent], mode: str, policy: bytes | None, pool_bytes:
             action = pick_action(mode, simulator, event, policy)
             started_ns = perf_counter_ns()
             if event.op == "alloc":
-                result = simulator.allocate(ptr_id=event.ptr_id, size=event.size, action=action)
+                result = simulator.allocate(
+                    ptr_id=event.ptr_id,
+                    size=event.size,
+                    action=action,
+                    request_flags=event.flags,
+                )
                 if not result.success:
                     failures += 1
             else:

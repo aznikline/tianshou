@@ -9,6 +9,16 @@ This prototype splits the problem into two cooperating pieces:
 
 The user-space side replays traces, trains a policy offline, and exports a compact table. The kernel side hosts a self-managed allocator that computes a bounded integer state key and does constant-time policy lookup with safe fallback.
 
+Both sides understand these semantic request flags:
+
+- `sync`
+- `async`
+- `anon`
+- `file`
+- `reclaimable`
+- `movable`
+- `high_order`
+
 ## Directory Layout
 
 User-space:
@@ -71,6 +81,12 @@ The deployable policy blob uses this binary layout:
 - checksum: 32-bit little-endian sum of payload bytes
 - payload: one byte per discrete state key
 
+The action table currently targets a 16-action space, including:
+
+- classical fit strategies (`first_fit`, `best_fit`, `largest_fit`)
+- tag-affinity strategies (`anon`, `file`, `reclaimable`)
+- semantic strategies (`sync_compact`, `async_defer`, `movable_spread`, `high_order_guard`)
+
 Inspect or rewrite a blob:
 
 ```bash
@@ -90,6 +106,14 @@ Load:
 ```bash
 sudo insmod kernel/rl_allocator/rl_allocator.ko mode=1 pool_bytes=1048576 max_blocks=4096
 ```
+
+Use the explicit semantic API when the caller can provide richer request context:
+
+```c
+void *rl_alloc_ex(size_t size, gfp_t flags, u32 req_flags);
+```
+
+`rl_alloc(size, flags)` remains available and derives a smaller subset of request semantics from `gfp_t` and request size.
 
 Switch modes:
 
@@ -131,6 +155,14 @@ Expected CSV schema:
 
 ```text
 ts,cpu,op,ptr_id,size,flags
+```
+
+Example rows:
+
+```text
+1,0,alloc,a0,64,sync|anon
+2,0,alloc,a1,32,async|file|reclaimable
+3,0,free,a0,0,0
 ```
 
 To plug in a real trace later:

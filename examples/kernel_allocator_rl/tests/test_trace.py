@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from examples.kernel_allocator_rl.config import BucketConfig
+from examples.kernel_allocator_rl.config import BucketConfig, RL_REQ_ANON, RL_REQ_HIGH_ORDER, RL_REQ_SYNC
 from examples.kernel_allocator_rl.trace import TraceEvent, load_trace_csv
 
 
@@ -24,4 +24,26 @@ def test_load_trace_csv_parses_alloc_and_free_rows(tmp_path: Path) -> None:
     assert rows == [
         TraceEvent(ts=1, cpu=0, op="alloc", ptr_id="a0", size=64, flags=0),
         TraceEvent(ts=2, cpu=0, op="free", ptr_id="a0", size=0, flags=0),
+    ]
+
+
+def test_load_trace_csv_parses_symbolic_flags(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace_flags.csv"
+    trace_path.write_text(
+        "ts,cpu,op,ptr_id,size,flags\n"
+        "1,0,alloc,a0,8192,sync|anon|high_order\n",
+        encoding="utf-8",
+    )
+
+    rows = load_trace_csv(trace_path)
+
+    assert rows == [
+        TraceEvent(
+            ts=1,
+            cpu=0,
+            op="alloc",
+            ptr_id="a0",
+            size=8192,
+            flags=RL_REQ_SYNC | RL_REQ_ANON | RL_REQ_HIGH_ORDER,
+        ),
     ]

@@ -3,6 +3,7 @@
 This directory contains a Linux 5.x style kernel module that exposes a self-managed allocator:
 
 - `rl_alloc(size, flags)`
+- `rl_alloc_ex(size, flags, req_flags)`
 - `rl_free(ptr)`
 
 The module does not replace global `kmalloc`/`kfree`. It manages private pools and can run in:
@@ -10,6 +11,16 @@ The module does not replace global `kmalloc`/`kfree`. It manages private pools a
 - `first_fit`
 - `best_fit`
 - `rl_table`
+
+The extended allocator understands these semantic request flags:
+
+- `sync`
+- `async`
+- `anon`
+- `file`
+- `reclaimable`
+- `movable`
+- `high_order`
 
 ## Build
 
@@ -47,6 +58,8 @@ Load a policy blob:
 ```bash
 sudo dd if=policy.bin of=/sys/kernel/rl_allocator/policy_blob bs=4096
 ```
+
+When the caller can provide richer allocation semantics, use `rl_alloc_ex()` and pass a prototype-specific `req_flags` bitmask instead of relying only on `gfp_t`.
 
 Unload:
 

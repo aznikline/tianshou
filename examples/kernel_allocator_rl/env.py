@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from time import perf_counter_ns
 
+from examples.kernel_allocator_rl.config import RL_ACTION_COUNT, action_is_eager
 from examples.kernel_allocator_rl.simulator import AllocatorSimulator
 from examples.kernel_allocator_rl.trace import TraceEvent
 
@@ -60,16 +61,16 @@ class KernelAllocatorEnv:
         self.reward_weights = reward_weights or RewardWeights()
         self.index = 0
         if gym is not None and np is not None:
-            self.action_space = gym.spaces.Discrete(8)
+            self.action_space = gym.spaces.Discrete(RL_ACTION_COUNT)
             self.observation_space = gym.spaces.Box(
                 low=0,
                 high=255,
-                shape=(8,),
+                shape=(9,),
                 dtype=np.int32,
             )
         else:
-            self.action_space = DiscreteSpace(n=8)
-            self.observation_space = BoxSpace(shape=(8,))
+            self.action_space = DiscreteSpace(n=RL_ACTION_COUNT)
+            self.observation_space = BoxSpace(shape=(9,))
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         if gym is not None:
@@ -90,19 +91,24 @@ class KernelAllocatorEnv:
 
     def _obs(self):
         if not self.trace:
-            values = [0] * 8
+            values = [0] * 9
             return np.array(values, dtype=np.int32) if np is not None else Observation(values)
         event = self.trace[min(self.index, len(self.trace) - 1)]
+        request_flags = event.flags
+        if event.op == "free" and not request_flags:
+            request_flags = self.simulator.request_flags_for_ptr(event.ptr_id)
         state = self.simulator.build_state(
             request_size=event.size,
             op=event.op,
             cpu=event.cpu,
+            request_flags=request_flags,
         )
         values = [
             state.get("op", 0),
             state.get("req_bucket", 0),
             state.get("frag_bucket", 0),
             state.get("pressure_bucket", 0),
+            state.get("req_flags", 0),
             self.simulator.free_hole_count,
             self.simulator.free_bytes,
             self.simulator.largest_free_block,
@@ -113,12 +119,20 @@ class KernelAllocatorEnv:
     def _apply_event(self, event: TraceEvent, action: int) -> tuple[float, dict[str, int | bool]]:
         before_frag = self.simulator.fragmentation_ratio()
         started_ns = perf_counter_ns()
+        request_flags = event.flags
+        if event.op == "free" and not request_flags:
+            request_flags = self.simulator.request_flags_for_ptr(event.ptr_id)
         if event.op == "alloc":
-            result = self.simulator.allocate(ptr_id=event.ptr_id, size=event.size, action=action)
+            result = self.simulator.allocate(
+                ptr_id=event.ptr_id,
+                size=event.size,
+                action=action,
+                request_flags=request_flags,
+            )
             success = result.success
-            eager_coalesce = action >= 4
+            eager_coalesce = action_is_eager(action)
         else:
-            eager_coalesce = action >= 4
+            eager_coalesce = action_is_eager(action)
             self.simulator.free(ptr_id=event.ptr_id, eager_coalesce=eager_coalesce)
             success = True
         latency_ns = perf_counter_ns() - started_ns
@@ -133,4 +147,5 @@ class KernelAllocatorEnv:
             "latency_ns": latency_ns,
             "success": success,
             "eager_coalesce": eager_coalesce,
+            "request_flags": request_flags,
         }
