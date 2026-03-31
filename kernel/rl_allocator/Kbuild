@@ -1,0 +1,2 @@
+obj-m += rl_allocator.o
+rl_allocator-y := rl_module.o rl_pool.o rl_policy.o
