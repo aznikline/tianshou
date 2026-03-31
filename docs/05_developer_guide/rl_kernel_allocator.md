@@ -17,6 +17,7 @@ User-space:
 - `examples/kernel_allocator_rl/trace.py`
 - `examples/kernel_allocator_rl/simulator.py`
 - `examples/kernel_allocator_rl/env.py`
+- `examples/kernel_allocator_rl/train_grpo.py`
 - `examples/kernel_allocator_rl/train_dqn.py`
 - `examples/kernel_allocator_rl/policy_export.py`
 - `examples/kernel_allocator_rl/generate_trace.py`
@@ -47,10 +48,12 @@ python3 examples/kernel_allocator_rl/generate_trace.py \
 Validate the training entrypoint:
 
 ```bash
-python3 examples/kernel_allocator_rl/train_dqn.py \
+python3 examples/kernel_allocator_rl/train_grpo.py \
   --trace examples/kernel_allocator_rl/data/sample_trace.csv \
   --dry-run
 ```
+
+The legacy `train_dqn.py` path is kept as a compatibility wrapper and forwards to the GRPO entrypoint.
 
 Run user-space tests:
 
@@ -133,7 +136,7 @@ ts,cpu,op,ptr_id,size,flags
 To plug in a real trace later:
 
 1. convert the trace into the CSV schema above,
-2. point `train_dqn.py --trace` to the converted file,
+2. point `train_grpo.py --trace` to the converted file,
 3. export the resulting policy table,
 4. inspect or rewrite the blob with `make_policy_blob.py`,
 5. load it into `/sys/kernel/rl_allocator/policy_blob`.
@@ -143,4 +146,4 @@ To plug in a real trace later:
 - The current host environment may not provide a Linux kernel build tree, so `.ko` compilation must be verified on Linux.
 - The benchmark script currently replays traces through the user-space simulator for portability.
 - The module prototype manages private pools; it does not replace global kernel allocators.
-- The training entrypoint currently exposes a validated `--dry-run` path; full DQN execution depends on a Linux/PyTorch-capable runtime with the appropriate dependencies installed.
+- The training entrypoint currently exposes a validated `--dry-run` path; full GRPO execution depends on a Linux/PyTorch-capable runtime with the appropriate dependencies installed.

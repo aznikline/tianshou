@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 
-def test_training_script_supports_dry_run(tmp_path: Path) -> None:
+def test_grpo_training_script_supports_dry_run(tmp_path: Path) -> None:
     trace_path = tmp_path / "trace.csv"
     trace_path.write_text(
         "ts,cpu,op,ptr_id,size,flags\n"
@@ -15,7 +15,7 @@ def test_training_script_supports_dry_run(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            "examples/kernel_allocator_rl/train_dqn.py",
+            "examples/kernel_allocator_rl/train_grpo.py",
             "--trace",
             str(trace_path),
             "--dry-run",
@@ -26,5 +26,5 @@ def test_training_script_supports_dry_run(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert "dry-run" in result.stdout.lower()
     assert "grpo" in result.stdout.lower()
+    assert "dry-run" in result.stdout.lower()

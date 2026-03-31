@@ -4,7 +4,7 @@
 
 **Goal:** Build a self-contained RL-guided kernel allocator prototype with a Python simulator/training pipeline, table export path, Linux 5.x kernel module, benchmark scripts, and reproducible documentation.
 
-**Architecture:** The implementation is split into a user-space side and a kernel-space side. The user-space side provides a trace-driven simulator, DQN training pipeline, and policy-table exporter. The kernel-space side implements a bounded free-list allocator over private memory pools, constant-time table lookup, sysfs-based policy management, and safe fallback to baseline heuristics.
+**Architecture:** The implementation is split into a user-space side and a kernel-space side. The user-space side provides a trace-driven simulator, GRPO training pipeline, a compatibility wrapper for the legacy DQN script name, and a policy-table exporter. The kernel-space side implements a bounded free-list allocator over private memory pools, constant-time table lookup, sysfs-based policy management, and safe fallback to baseline heuristics.
 
 **Tech Stack:** Python 3, pytest, Tianshou/PyTorch for training, Linux kernel module C, Kbuild/Makefile, shell scripts for build and benchmark automation.
 
@@ -19,6 +19,7 @@
 - Create: `examples/kernel_allocator_rl/simulator.py`
 - Create: `examples/kernel_allocator_rl/env.py`
 - Create: `examples/kernel_allocator_rl/policy_export.py`
+- Create: `examples/kernel_allocator_rl/train_grpo.py`
 - Create: `examples/kernel_allocator_rl/train_dqn.py`
 - Create: `examples/kernel_allocator_rl/generate_trace.py`
 - Create: `examples/kernel_allocator_rl/data/sample_trace.csv`
@@ -27,6 +28,7 @@
 - Create: `examples/kernel_allocator_rl/tests/test_simulator.py`
 - Create: `examples/kernel_allocator_rl/tests/test_env.py`
 - Create: `examples/kernel_allocator_rl/tests/test_policy_export.py`
+- Create: `examples/kernel_allocator_rl/tests/test_train_grpo.py`
 - Create: `examples/kernel_allocator_rl/tests/test_train_dqn.py`
 - Create: `kernel/rl_allocator/Makefile`
 - Create: `kernel/rl_allocator/Kbuild`
@@ -389,11 +391,13 @@ git commit -m "feat: add RL allocator environment and policy export"
 ### Task 4: Add training, synthetic traces, and reproducibility docs
 
 **Files:**
+- Create: `examples/kernel_allocator_rl/train_grpo.py`
 - Create: `examples/kernel_allocator_rl/train_dqn.py`
 - Create: `examples/kernel_allocator_rl/generate_trace.py`
 - Create: `examples/kernel_allocator_rl/data/sample_trace.csv`
 - Create: `examples/kernel_allocator_rl/scripts/reproduce_training.sh`
 - Create: `examples/kernel_allocator_rl/README.md`
+- Create: `examples/kernel_allocator_rl/tests/test_train_grpo.py`
 - Create: `examples/kernel_allocator_rl/tests/test_train_dqn.py`
 
 - [ ] **Step 1: Write the failing training smoke test**
@@ -415,7 +419,7 @@ def test_training_script_supports_dry_run(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            "examples/kernel_allocator_rl/train_dqn.py",
+            "examples/kernel_allocator_rl/train_grpo.py",
             "--trace",
             str(trace_path),
             "--dry-run",
@@ -430,8 +434,8 @@ def test_training_script_supports_dry_run(tmp_path: Path) -> None:
 
 - [ ] **Step 2: Run the smoke test to verify it fails**
 
-Run: `python3 -m pytest examples/kernel_allocator_rl/tests/test_train_dqn.py -q`
-Expected: FAIL because `train_dqn.py` does not exist yet.
+Run: `python3 -m pytest examples/kernel_allocator_rl/tests/test_train_grpo.py examples/kernel_allocator_rl/tests/test_train_dqn.py -q`
+Expected: FAIL because `train_grpo.py` does not exist yet and the compatibility wrapper does not mention GRPO.
 
 - [ ] **Step 3: Implement the training and synthetic trace scaffolding**
 
@@ -445,13 +449,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.dry_run:
-        print(f"dry-run training using trace: {args.trace}")
+        print(f"grpo dry-run training using trace: {args.trace}")
         return 0
-    raise SystemExit("full training path not implemented in this step")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit("full GRPO training path not implemented in this step")
 ```
 
 - [ ] **Step 4: Add the README, sample trace, and reproduce script**
@@ -471,26 +471,28 @@ Add a reproduce script like:
 ```bash
 #!/usr/bin/env bash
 set -eu
-python3 examples/kernel_allocator_rl/train_dqn.py \
+python3 examples/kernel_allocator_rl/train_grpo.py \
   --trace examples/kernel_allocator_rl/data/sample_trace.csv \
   --dry-run
 ```
 
 - [ ] **Step 5: Run the smoke test to verify it passes**
 
-Run: `python3 -m pytest examples/kernel_allocator_rl/tests/test_train_dqn.py -q`
+Run: `python3 -m pytest examples/kernel_allocator_rl/tests/test_train_grpo.py examples/kernel_allocator_rl/tests/test_train_dqn.py -q`
 Expected: PASS for the dry-run coverage added in this task.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add examples/kernel_allocator_rl/train_dqn.py \
+git add examples/kernel_allocator_rl/train_grpo.py \
+  examples/kernel_allocator_rl/train_dqn.py \
   examples/kernel_allocator_rl/generate_trace.py \
   examples/kernel_allocator_rl/data/sample_trace.csv \
   examples/kernel_allocator_rl/scripts/reproduce_training.sh \
   examples/kernel_allocator_rl/README.md \
+  examples/kernel_allocator_rl/tests/test_train_grpo.py \
   examples/kernel_allocator_rl/tests/test_train_dqn.py
-git commit -m "feat: add RL allocator training scaffolding"
+git commit -m "feat: add RL allocator GRPO training scaffolding"
 ```
 
 ### Task 5: Implement the kernel policy loader and allocator core
